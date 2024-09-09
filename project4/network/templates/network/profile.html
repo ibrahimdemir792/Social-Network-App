@@ -1,0 +1,270 @@
+{% extends 'network/layout.html' %}
+{% load static %}
+
+{% block title %} Network_Profile_Page {% endblock %}
+
+{% block body_class %} profile {% endblock %}
+
+{% block content %}
+<div class="flexcontainer">
+    <div class="middlecontainer">
+        <section class="headsec">
+            <i class="fa fa-arrow-left" id="fa-arrow-left"></i>
+            <div>
+                <h3>{{ profile.user }}</h2>
+                    <span>{{ posts|length }} posts</span>
+            </div>
+        </section>
+        <section class="networkprofile">
+            <div class="headerprofileimage">
+                {% if profile.profile_pic == "" %}
+                    <img src="{% static 'network/images/avatar.png' %}" alt="profile image">
+                {% else %}
+                    <img src="{{ profile.profile_pic }}" alt="profile image">
+                {% endif %}
+
+                <!-- React component-->
+                {% if user.username == profile.user %}
+                    <div id="edit_profile"></div>
+                {% endif %}
+
+            </div>
+            <div class="bio">
+                <div>{{ profile.bio }} </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+<!-- React component-->
+<div id="app"></div>
+
+<script type="text/babel">
+
+    // To get the CSRF token from the cookie
+    function getCookie(name) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(';').shift();
+    }
+
+    function App() {
+        const pageTitle = document.title;
+        const username = "{{ user.username }}";
+        const profile = {{ profile | safe }};
+        const user_id = {{ user_id }};
+
+        // Followers and Following count
+        const [followersCount, setFollowersCount] = React.useState({{profile.followers|length}});
+        const [followingCount, setFollowingCount] = React.useState({{profile.following|length}});
+        
+        // Follow/Unfollow button
+        const isFollowing = {{profile.followers | safe}}.includes(username) ? "isFollowing" : "isNotFollowing";
+        const [followStatus, setFollowStatus] = React.useState(isFollowing);
+        
+        // Like button and count
+        const [likeCounts, setLikeCounts] = React.useState(0);
+
+        // Editing post id
+        const [editingPostId, setEditingPostId] = React.useState(null);
+        const handleEditClick = (post_id) => {
+            setEditingPostId(post_id);
+        }
+        const [editedContent, setEditedContent] = React.useState("");
+        const handleTextareaChange = (event) => {
+            setEditedContent(event.target.value);
+        }
+
+        const handleSaveClick = (post_id, newContent) => {
+            fetch(`/edit_post/${post_id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                },
+                body:JSON.stringify({newContent}),
+
+            })
+            posts.forEach(post => {
+                if (post.id === post_id) {
+                    post.content = newContent;
+                }
+            });
+            setEditingPostId(null);
+        }
+
+
+        // Fetch data from Django API endpoint
+        const [posts, setPosts] = React.useState([]);
+        const [currentPage, setCurrentPage] = React.useState(1);
+        const [totalPages, setTotalPages] = React.useState(1);
+        React.useEffect(() => {
+            fetch(`/load_posts/${pageTitle}/${user_id}/${currentPage}`)
+                .then(response => response.json())
+                .then(data => {
+                    setPosts(data.posts);
+                    setCurrentPage(data.current_page);
+                    setTotalPages(data.total_pages);
+                    // Initialize like counts for each post
+                    const initialLikeCounts = {};
+                    data.posts.forEach(post => {
+                        initialLikeCounts[post.id] = post.likes_count;
+                    });
+                    setLikeCounts(initialLikeCounts);
+                });
+        }, [currentPage]);
+        const handlePageClick = (page) => {
+            setCurrentPage(page);
+        };
+
+        function likeButtonClicked(event, post_id) {
+            const isLiked = event.target.classList.contains("liked");
+            const action = isLiked ? "unlike" : "like";
+            fetch(`/like/${post_id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                },
+                body: JSON.stringify({action}),
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    console.error('Error First:', data.error);
+                } else {
+                    const updatedLikeCounts = { ...likeCounts }; // Create a copy of the likeCounts object
+                    updatedLikeCounts[post_id] = data.likes_count;
+                    setLikeCounts(updatedLikeCounts);
+                }
+            })
+            .catch(error => {
+                console.error('Error Second: ', error);
+            });
+            event.target.classList.toggle("liked");
+        }
+
+        function handleFollowClick(profile_id) {
+            // Toggle follow status
+            const newFollowStatus = followStatus === "isFollowing" ? "isNotFollowing" : "isFollowing";
+            
+            fetch(`/follow/${profile_id}`, {
+                method: "PUT",
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken' : getCookie('csrftoken'),
+                },
+                body: JSON.stringify({followStatus}),
+            })
+            .then (response => response.json())
+            .then (data => {
+                if (data.error) {
+                    console.error('Error first', data.error);
+                } else {
+                    setFollowStatus(newFollowStatus);
+                    setFollowersCount(data.followers_count);      
+                }
+            })
+        }
+
+        return (
+            <div className="outer-container">
+                <div className="followers-following">
+                    <div className="followers">
+                        <div>{followersCount} <span> Followers </span> </div>
+                    </div>
+                    <div className="following">
+                        <div>{followingCount} <span> Following </span> </div>
+                    </div>
+                </div>
+                {username != profile.user && (
+                    <button className={`${followStatus === "isFollowing" ? 'btn btn-danger' : 'btn btn-primary'}`} onClick={() => handleFollowClick(profile.id)}>
+                        {followStatus === "isFollowing" ? 'Unfollow' : 'Follow'}
+                    </button>
+                )}
+                <div id="all_posts" className="post_container">
+                    {posts.filter(post => post.author.username==profile.user).length === 0 && (
+                        <div>You haven't shared anything yet.</div>
+                    )}
+                    {posts.filter(post => post.author.username==profile.user).map(post => (
+                        
+                        <div key={post.id} className="post_container">
+                            <div key={post.author}>{post.author.username}</div>
+                            {editingPostId === post.id ? (
+                                // Render texterea for editing
+                                <div>
+                                    <textarea className="form-control" data={editedContent} onChange={handleTextareaChange} defaultValue={post.content} />
+                                    <button className="btn btn-primary" onClick={() => handleSaveClick(post.id, editedContent)}>Save</button>
+                                </div>
+                            ) : (
+                                // Render post content
+                                <div key={post.content} className="post_container"> {post.content} </div>
+                            )}
+                            <div className="like-button">
+                                <div className="heart-bg">
+                                    <div className={`heart-icon ${post.likes_who.includes(username) ? 'liked': ''}`} onClick={(event) => likeButtonClicked(event, post.id)}></div>
+                                </div>
+                                <div className="like-count">{likeCounts[post.id]}</div>
+                            </div>
+                            {post.author.username === username && (
+                                // Render "Edit" button for the user's own posts
+                                <button className="btn btn-primary" onClick={() => handleEditClick(post.id)}>Edit</button>
+                            )}
+                            <div key={post.created_at}>{post.created_at}</div>
+                        </div>
+                    ))}
+                    {totalPages > 1 && (
+                        <div>
+                            {Array.from({ length: totalPages }, (_, index) => index + 1).map(page => (
+                            <button key={page} onClick={() => handlePageClick(page)}>
+                                {page}
+                            </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+            );
+    }
+
+    function Edit() {
+        const [isVisible, setIsVisible] = React.useState(false);
+        const csrfToken = getCookie('csrftoken');
+
+        function handleEditProfileClick() {
+            setIsVisible(!isVisible);
+            console.log('Edit Profile Clicked');
+        }
+
+        return (
+            <div className="outer-container">
+                <button id="editButton" className="btn btn-info" onClick={() => handleEditProfileClick()} >Edit Profile</button>
+                {isVisible && 
+                    <div className="profileInfo">
+                        <form action="/edit_profile" method="post" id="editProfileForm">
+                            <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
+                            <div className="form-group">
+                                <label for="bio">Bio</label>
+                                <textarea className="form-control" name="bio" id="bio" rows="3" placeholder="Write something about yourself" defaultValue="{{profile.bio}}"></textarea>
+                            </div>
+                            <div className="form-group">
+                                <label for="profile_pic">Profile Picture</label>
+                                <input type="url" className="form-control-file" name="profile_pic" id="profile_pic" placeholder="Picture URL" defaultValue="{{profile.profile_pic}}" />
+                            </div>
+                            <button type="submit" className="btn btn-primary">Save</button>
+                        </form>
+                    </div>
+                }
+            </div>
+
+        );
+    
+    }
+
+    // Render the App component
+    ReactDOM.createRoot(document.getElementById('app')).render(<App />)
+    {% if user.username == profile.user %}
+        ReactDOM.createRoot(document.getElementById('edit_profile')).render(<Edit />)
+    {% endif %}
+</script>
+{% endblock %}

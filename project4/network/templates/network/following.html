@@ -1,0 +1,132 @@
+{% extends "network/layout.html" %}
+
+{% block title %} following {% endblock %}
+
+
+{% block content%}
+
+    {% if user.is_authenticated %}
+    <div class="post_container" > 
+        <h4> New Post </h4>
+        <form action="{% url 'new_post' %}" method="post">
+            {% csrf_token %}
+            <textarea class="form-control" name="postContent" placeholder="What's on your mind?" required></textarea>
+            <button class="btn btn-primary" type="submit">Post</button>
+        </form>
+    </div>
+    {% endif %}
+
+    <h4> Following </h4>
+
+    <!-- React component-->
+    <div id="app">
+    </div>
+
+    <script type="text/babel">
+
+        // To get the CSRF token from the cookie
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+        }
+
+        function App() {
+            const pageTitle = document.title;
+            const username = "{{ user.username }}";
+            const [following, setFollowing] = React.useState({{ profile.following | safe }});
+            
+            const [likeCounts, setLikeCounts] = React.useState(0); 
+
+            // State to store posts
+            
+
+            // Fetch data from Django API endpoint
+            const [posts, setPosts] = React.useState([]);
+            const [currentPage, setCurrentPage] = React.useState(1);
+            const [totalPages, setTotalPages] = React.useState(1);
+            React.useEffect(() => {
+                fetch(`/load_posts/${pageTitle}/0/${currentPage}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        setPosts(data.posts);
+                        setCurrentPage(data.current_page);
+                        setTotalPages(data.total_pages);
+                        // Initialize like counts for each post
+                        const initialLikeCounts = {};
+                        data.posts.forEach(post => {
+                            initialLikeCounts[post.id] = post.likes_count;
+                        });
+                        setLikeCounts(initialLikeCounts);
+                    });
+            }, [currentPage]);
+            const handlePageClick = (page) => {
+                setCurrentPage(page);
+            };
+
+
+            function likeButtonClicked(event, post_id) {
+                const isLiked = event.target.classList.contains("liked");
+                const action = isLiked ? "unlike" : "like";
+                fetch(`/like/${post_id}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken'),
+                    },
+                    body: JSON.stringify({action}),
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        console.error('Error First:', data.error);
+                    } else {
+                        const updatedLikeCounts = { ...likeCounts }; // Create a copy of the likeCounts object
+                        updatedLikeCounts[post_id] = data.likes_count;
+                        setLikeCounts(updatedLikeCounts);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error Second: ', error);
+                });
+                event.target.classList.toggle("liked");
+            }
+
+            return (
+                <div id="all_posts" className="post_container"> 
+                    {following.length === 0 && <div>You are not following anyone</div>}
+                    {following.length !== 0 && posts.length === 0 && <div>Users you follow haven't shared a post yet</div>}
+                    {posts.map(post => (
+                        <div key={post.id} className="post_container">
+                            <div key={post.author}>
+                                <a href={`/profile/${post.author.id}`}>{post.author.username}</a>
+                            </div>
+                            <div key={post.content} className="post_container">{post.content}</div>
+                            <div className="like-button">
+                                <div className="heart-bg">
+                                    <div className={`heart-icon ${post.likes_who.includes(username) ? 'liked': ''}`} onClick={(event) => likeButtonClicked(event, post.id)}></div>
+                                </div>
+                                <div className="like-count">{likeCounts[post.id]}</div>
+                            </div>
+                            <div key={post.created_at}>{post.created_at}</div>
+                        </div>
+
+                    ))}
+                    {totalPages > 1 && (
+                        <div>
+                            {Array.from({ length: totalPages }, (_, index) => index + 1).map(page => (
+                            <button key={page} onClick={() => handlePageClick(page)}>
+                                {page}
+                            </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Render the App component to the div with id 'app'
+        ReactDOM.createRoot(document.getElementById('app')).render(<App />)
+    </script>
+
+{% endblock %}
